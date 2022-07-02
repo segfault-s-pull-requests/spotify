@@ -141,6 +141,136 @@ func TestGetPlaylistTracks(t *testing.T) {
 	}
 }
 
+func TestGetPlaylistItemsEpisodes(t *testing.T) {
+	client, server := testClientFile(http.StatusOK, "test_data/playlist_items_episodes.json")
+	defer server.Close()
+
+	tracks, err := client.GetPlaylistItems(context.Background(), "playlistID")
+	if err != nil {
+		t.Error(err)
+	}
+	if tracks.Total != 4 {
+		t.Errorf("Got %d tracks, expected 47\n", tracks.Total)
+	}
+	if len(tracks.Items) == 0 {
+		t.Fatal("No tracks returned")
+	}
+	expected := "112: Dirty Coms"
+	actual := tracks.Items[0].Track.Episode.Name
+	if expected != actual {
+		t.Errorf("Got '%s', expected '%s'\n", actual, expected)
+	}
+	added := tracks.Items[0].AddedAt
+	tm, err := time.Parse(TimestampLayout, added)
+	if err != nil {
+		t.Error(err)
+	}
+	if f := tm.Format(DateLayout); f != "2022-05-20" {
+		t.Errorf("Expected added at 2014-11-25, got %s\n", f)
+	}
+}
+
+func TestGetPlaylistItemsTracks(t *testing.T) {
+	client, server := testClientFile(http.StatusOK, "test_data/playlist_items_tracks.json")
+	defer server.Close()
+
+	tracks, err := client.GetPlaylistItems(context.Background(), "playlistID")
+	if err != nil {
+		t.Error(err)
+	}
+	if tracks.Total != 2 {
+		t.Errorf("Got %d tracks, expected 47\n", tracks.Total)
+	}
+	if len(tracks.Items) == 0 {
+		t.Fatal("No tracks returned")
+	}
+	expected := "Typhoons"
+	actual := tracks.Items[0].Track.Track.Name
+	if expected != actual {
+		t.Errorf("Got '%s', expected '%s'\n", actual, expected)
+	}
+	added := tracks.Items[0].AddedAt
+	tm, err := time.Parse(TimestampLayout, added)
+	if err != nil {
+		t.Error(err)
+	}
+	if f := tm.Format(DateLayout); f != "2022-05-20" {
+		t.Errorf("Expected added at 2014-11-25, got %s\n", f)
+	}
+}
+
+func TestGetPlaylistItemsTracksAndEpisodes(t *testing.T) {
+	client, server := testClientFile(http.StatusOK, "test_data/playlist_items_episodes_and_tracks.json")
+	defer server.Close()
+
+	tracks, err := client.GetPlaylistItems(context.Background(), "playlistID")
+	if err != nil {
+		t.Error(err)
+	}
+	if tracks.Total != 4 {
+		t.Errorf("Got %d tracks, expected 47\n", tracks.Total)
+	}
+	if len(tracks.Items) == 0 {
+		t.Fatal("No tracks returned")
+	}
+
+	expected := "491- The Missing Middle"
+	actual := tracks.Items[0].Track.Episode.Name
+	if expected != actual {
+		t.Errorf("Got '%s', expected '%s'\n", actual, expected)
+	}
+	added := tracks.Items[0].AddedAt
+	tm, err := time.Parse(TimestampLayout, added)
+	if err != nil {
+		t.Error(err)
+	}
+	if f := tm.Format(DateLayout); f != "2022-05-20" {
+		t.Errorf("Expected added at 2014-11-25, got %s\n", f)
+	}
+
+	expected = "Typhoons"
+	actual = tracks.Items[2].Track.Track.Name
+	if expected != actual {
+		t.Errorf("Got '%s', expected '%s'\n", actual, expected)
+	}
+	added = tracks.Items[0].AddedAt
+	tm, err = time.Parse(TimestampLayout, added)
+	if err != nil {
+		t.Error(err)
+	}
+	if f := tm.Format(DateLayout); f != "2022-05-20" {
+		t.Errorf("Expected added at 2014-11-25, got %s\n", f)
+	}
+}
+
+func TestGetPlaylistItemsOverride(t *testing.T) {
+	var types string
+	client, server := testClientString(http.StatusForbidden, "", func(r *http.Request) {
+		types = r.URL.Query().Get("additional_types")
+	})
+	defer server.Close()
+
+	_, _ = client.GetPlaylistItems(context.Background(), "playlistID", AdditionalTypes(EpisodeAdditionalType))
+
+	if types != "episode" {
+		t.Errorf("Expected additional type episode, got %s\n", types)
+	}
+}
+
+func TestGetPlaylistItemsDefault(t *testing.T) {
+	var types string
+	client, server := testClientString(http.StatusForbidden, "", func(r *http.Request) {
+		types = r.URL.Query().Get("additional_types")
+	})
+	defer server.Close()
+
+	_, _ = client.GetPlaylistItems(context.Background(), "playlistID")
+
+	if types != "episode,track" {
+		t.Errorf("Expected additional type episode, got %s\n", types)
+	}
+}
+
 func TestUserFollowsPlaylist(t *testing.T) {
 	client, server := testClientString(http.StatusOK, `[ true, false ]`)
 	defer server.Close()
@@ -160,7 +290,7 @@ var newPlaylist = `
 "collaborative": %t,
 "description": "Test Description",
 "external_urls": {
-	"spotify": "http://open.spotify.com/user/thelinmichael/playlist/7d2D2S200NyUE5KYs80PwO"
+	"spotify": "api.http://open.spotify.com/user/thelinmichael/playlist/7d2D2S200NyUE5KYs80PwO"
 },
 "followers": {
 	"href": null,
@@ -172,7 +302,7 @@ var newPlaylist = `
 "name": "A New Playlist",
 "owner": {
 	"external_urls": {
-	"spotify": "http://open.spotify.com/user/thelinmichael"
+	"spotify": "api.http://open.spotify.com/user/thelinmichael"
 	},
 	"href": "https://api.spotify.com/v1/users/thelinmichael",
 	"id": "thelinmichael",
@@ -271,7 +401,7 @@ func TestChangePlaylistDescription(t *testing.T) {
 	}
 }
 
-func TestChangePlaylistNamdAndAccess(t *testing.T) {
+func TestChangePlaylistNameAndAccess(t *testing.T) {
 	client, server := testClientString(http.StatusOK, "")
 	defer server.Close()
 
@@ -280,7 +410,7 @@ func TestChangePlaylistNamdAndAccess(t *testing.T) {
 	}
 }
 
-func TestChangePlaylistNamdAccessAndDescription(t *testing.T) {
+func TestChangePlaylistNameAccessAndDescription(t *testing.T) {
 	client, server := testClientString(http.StatusOK, "")
 	defer server.Close()
 
@@ -406,6 +536,96 @@ func TestRemoveTracksFromPlaylistOpt(t *testing.T) {
 	snapshotID, err := client.RemoveTracksFromPlaylistOpt(context.Background(), "playlistID", tracks, "")
 	if err != nil || snapshotID != "JbtmHBDBAYu3/bt8BOXKjzKx3i0b6LCa/wVjyl6qQ2Yf6nFXkbmzuEa+ZI/U1yF+" {
 		t.Fatal("Remove call failed. err=", err)
+	}
+}
+
+func TestClient_ReplacePlaylistItems(t *testing.T) {
+	type clientFields struct {
+		httpCode int
+		body     string
+	}
+	type args struct {
+		ctx        context.Context
+		playlistID ID
+		items      []URI
+	}
+	type want struct {
+		requestBody string
+		snapshot    string
+		err         string
+	}
+	tests := []struct {
+		name         string
+		clientFields clientFields
+		args         args
+		want         want
+	}{
+		{
+			name: "Happy path",
+			clientFields: clientFields{
+				httpCode: http.StatusCreated,
+				body:     `{"snapshot_id": "test_snapshot"}`,
+			},
+			args: args{
+				ctx:        context.TODO(),
+				playlistID: "playlistID",
+				items:      []URI{"spotify:track:track1", "spotify:track:track2"},
+			},
+			want: want{
+				requestBody: `{"uris":["spotify:track:track1","spotify:track:track2"]}`,
+				snapshot:    "test_snapshot",
+			},
+		}, {
+			name: "Forbidden",
+			clientFields: clientFields{
+				httpCode: http.StatusForbidden,
+			},
+			args: args{
+				ctx:        context.TODO(),
+				playlistID: "playlistID",
+				items:      []URI{"spotify:track:track1", "spotify:track:track2"},
+			},
+			want: want{
+				err: "spotify: HTTP 403: Forbidden (body empty)",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotRequestBody string
+
+			c, server := testClientString(tt.clientFields.httpCode, tt.clientFields.body, func(request *http.Request) {
+				b, err := ioutil.ReadAll(request.Body)
+				defer request.Body.Close()
+				if err != nil {
+					t.Error(err)
+				}
+
+				gotRequestBody = string(b)
+			})
+			defer server.Close()
+
+			gotSnapshot, gotErr := c.ReplacePlaylistItems(tt.args.ctx, tt.args.playlistID, tt.args.items...)
+			if gotErr == nil && tt.want.err != "" {
+				t.Errorf("Expected an error %s, got nil", tt.want.err)
+				return
+			}
+			if gotErr != nil {
+				if gotErr.Error() != tt.want.err {
+					t.Errorf("Expected error %s, got %s", tt.want.err, gotErr)
+				}
+
+				return
+			}
+
+			if gotSnapshot != tt.want.snapshot {
+				t.Errorf("Expected snapshot %s, got %s", tt.want.snapshot, gotSnapshot)
+			}
+
+			if gotRequestBody != tt.want.requestBody {
+				t.Errorf("Expected requestBody %s, got %s", tt.want.requestBody, gotRequestBody)
+			}
+		})
 	}
 }
 

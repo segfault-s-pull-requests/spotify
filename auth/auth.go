@@ -2,7 +2,6 @@ package spotifyauth
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"net/http"
 	"os"
@@ -48,7 +47,7 @@ const (
 	// ScopeUserLibraryRead seeks read access to a user's "Your Music" library.
 	ScopeUserLibraryRead = "user-library-read"
 	// ScopeUserReadPrivate seeks read access to a user's
-	// subsription details (type of user account).
+	// subscription details (type of user account).
 	ScopeUserReadPrivate = "user-read-private"
 	// ScopeUserReadEmail seeks read access to a user's email address.
 	ScopeUserReadEmail = "user-read-email"
@@ -71,7 +70,7 @@ const (
 //
 // Example:
 //
-//     a := spotifyauth.New(redirectURL, spotify.ScopeUserLibaryRead, spotify.ScopeUserFollowRead)
+//     a := spotifyauth.New(redirectURL, spotify.ScopeUserLibraryRead, spotify.ScopeUserFollowRead)
 //     // direct user to Spotify to log in
 //     http.Redirect(w, r, a.AuthURL("state-string"), http.StatusFound)
 //
@@ -140,22 +139,11 @@ func New(opts ...AuthenticatorOption) *Authenticator {
 	return a
 }
 
-// contextWithHTTPClient returns a context with a value set to override the oauth2 http client as Spotify does not
-// support HTTP/2
-//
-// see: https://github.com/zmb3/spotify/issues/20
-func contextWithHTTPClient(ctx context.Context) context.Context {
-	tr := &http.Transport{
-		TLSNextProto: map[string]func(authority string, c *tls.Conn) http.RoundTripper{},
-	}
-	return context.WithValue(ctx, oauth2.HTTPClient, &http.Client{Transport: tr})
-}
-
 // ShowDialog forces the user to approve the app, even if they have already done so.
 // Without this, users who have already approved the app are immediately redirected to the redirect uri.
 var ShowDialog = oauth2.SetAuthURLParam("show_dialog", "true")
 
-// AuthURL returns a URL to the the Spotify Accounts Service's OAuth2 endpoint.
+// AuthURL returns a URL to the Spotify Accounts Service's OAuth2 endpoint.
 //
 // State is a token to protect the user from CSRF attacks.  You should pass the
 // same state to `Token`, where it will be validated.  For more info, refer to
@@ -180,17 +168,17 @@ func (a Authenticator) Token(ctx context.Context, state string, r *http.Request,
 	if actualState != state {
 		return nil, errors.New("spotify: redirect state parameter doesn't match")
 	}
-	return a.config.Exchange(contextWithHTTPClient(ctx), code, opts...)
+	return a.config.Exchange(ctx, code, opts...)
 }
 
 // Exchange is like Token, except it allows you to manually specify the access
 // code instead of pulling it out of an HTTP request.
 func (a Authenticator) Exchange(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
-	return a.config.Exchange(contextWithHTTPClient(ctx), code, opts...)
+	return a.config.Exchange(ctx, code, opts...)
 }
 
 // Client creates a *http.Client that will use the specified access token for its API requests.
 // Combine this with spotify.HTTPClientOpt.
 func (a Authenticator) Client(ctx context.Context, token *oauth2.Token) *http.Client {
-	return a.config.Client(contextWithHTTPClient(ctx), token)
+	return a.config.Client(ctx, token)
 }

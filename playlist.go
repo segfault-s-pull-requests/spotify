@@ -170,6 +170,9 @@ func (c *Client) GetPlaylist(ctx context.Context, playlistID ID, opts ...Request
 // playlist's Spotify ID.
 //
 // Supported options: Limit, Offset, Market, Fields
+//
+// Deprecated: the Spotify api is moving towards supporting both tracks and episodes. Use GetPlaylistItems which
+// supports these.
 func (c *Client) GetPlaylistTracks(
 	ctx context.Context,
 	playlistID ID,
@@ -181,6 +184,96 @@ func (c *Client) GetPlaylistTracks(
 	}
 
 	var result PlaylistTrackPage
+
+	err := c.get(ctx, spotifyURL, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return &result, err
+}
+
+// PlaylistItem contains info about an item in a playlist.
+type PlaylistItem struct {
+	// The date and time the track was added to the playlist.
+	// You can use the TimestampLayout constant to convert
+	// this field to a time.Time value.
+	// Warning: very old playlists may not populate this value.
+	AddedAt string `json:"added_at"`
+	// The Spotify user who added the track to the playlist.
+	// Warning: very old playlists may not populate this value.
+	AddedBy User `json:"added_by"`
+	// Whether this track is a local file or not.
+	IsLocal bool `json:"is_local"`
+	// Information about the track.
+	Track PlaylistItemTrack `json:"track"`
+}
+
+// PlaylistItemTrack is a union type for both tracks and episodes. If both
+// values are null, it's likely that the piece of content is not available in
+// the configured market.
+type PlaylistItemTrack struct {
+	Track   *FullTrack
+	Episode *EpisodePage
+}
+
+// UnmarshalJSON customises the unmarshalling based on the type flags set.
+func (t *PlaylistItemTrack) UnmarshalJSON(b []byte) error {
+	// Spotify API will return `track: null`` where the content is not available
+	// in the specified market. We should respect this and just pass the null
+	// up...
+	if bytes.Equal(b, []byte("null")) {
+		return nil
+	}
+
+	itemType := struct {
+		Type string `json:"type"`
+	}{}
+
+	err := json.Unmarshal(b, &itemType)
+	if err != nil {
+		return err
+	}
+
+	switch itemType.Type {
+	case "episode":
+		err := json.Unmarshal(b, &t.Episode)
+		if err != nil {
+			return err
+		}
+	case "track":
+		err := json.Unmarshal(b, &t.Track)
+		if err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unrecognized item type: %s", itemType.Type)
+	}
+
+	return nil
+}
+
+// PlaylistItemPage contains information about items in a playlist.
+type PlaylistItemPage struct {
+	basePage
+	Items []PlaylistItem `json:"items"`
+}
+
+// GetPlaylistItems gets full details of the items in a playlist, given the
+// playlist's Spotify ID.
+//
+// Supported options: Limit, Offset, Market, Fields
+func (c *Client) GetPlaylistItems(ctx context.Context, playlistID ID, opts ...RequestOption) (*PlaylistItemPage, error) {
+	spotifyURL := fmt.Sprintf("%splaylists/%s/tracks", c.baseURL, playlistID)
+
+	// Add default as the first option so it gets override by url.Values#Set
+	opts = append([]RequestOption{AdditionalTypes(EpisodeAdditionalType, TrackAdditionalType)}, opts...)
+
+	if params := processOptions(opts...).urlParams.Encode(); params != "" {
+		spotifyURL += "?" + params
+	}
+
+	var result PlaylistItemPage
 
 	err := c.get(ctx, spotifyURL, &result)
 	if err != nil {
@@ -374,7 +467,7 @@ func (c *Client) AddTracksToPlaylistOpt(ctx context.Context, playlistID ID, posi
 }
 
 // RemoveTracksFromPlaylist removes one or more tracks from a user's playlist.
-// This call requrles that the user has authorized the ScopePlaylistModifyPublic
+// This call requires that the user has authorized the ScopePlaylistModifyPublic
 // or ScopePlaylistModifyPrivate scopes.
 //
 // If the track(s) occur multiple times in the specified playlist, then all occurrences
@@ -424,8 +517,8 @@ func (c *Client) RemoveTracksFromPlaylistOpt(
 	ctx context.Context,
 	playlistID ID,
 	tracks []TrackToRemove,
-	snapshotID string) (newSnapshotID string, err error) {
-
+	snapshotID string,
+) (newSnapshotID string, err error) {
 	return c.removeTracksFromPlaylist(ctx, playlistID, tracks, snapshotID)
 }
 
@@ -433,8 +526,8 @@ func (c *Client) removeTracksFromPlaylist(
 	ctx context.Context,
 	playlistID ID,
 	tracks interface{},
-	snapshotID string) (newSnapshotID string, err error) {
-
+	snapshotID string,
+) (newSnapshotID string, err error) {
 	m := make(map[string]interface{})
 	m["tracks"] = tracks
 	if snapshotID != "" {
@@ -473,7 +566,7 @@ func (c *Client) removeTracksFromPlaylist(
 // ScopePlaylistModifyPublic scope.  Modifying a private playlist requires the
 // ScopePlaylistModifyPrivate scope.
 //
-// A maximum of 100 tracks is permited in this call.  Additional tracks must be
+// A maximum of 100 tracks is permitted in this call.  Additional tracks must be
 // added via AddTracksToPlaylist.
 func (c *Client) ReplacePlaylistTracks(ctx context.Context, playlistID ID, trackIDs ...ID) error {
 	trackURIs := make([]string, len(trackIDs))
@@ -492,6 +585,44 @@ func (c *Client) ReplacePlaylistTracks(ctx context.Context, playlistID ID, track
 	}
 
 	return nil
+}
+
+// ReplacePlaylistItems replaces all the items in a playlist, overwriting its
+// existing tracks  This can be useful for replacing or reordering tracks, or for
+// clearing a playlist.
+//
+// Modifying a public playlist requires that the user has authorized the
+// ScopePlaylistModifyPublic scope.  Modifying a private playlist requires the
+// ScopePlaylistModifyPrivate scope.
+//
+// A maximum of 100 tracks is permited in this call.  Additional tracks must be
+// added via AddTracksToPlaylist.
+func (c *Client) ReplacePlaylistItems(ctx context.Context, playlistID ID, items ...URI) (string, error) {
+	m := make(map[string]interface{})
+	m["uris"] = items
+
+	body, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+
+	spotifyURL := fmt.Sprintf("%splaylists/%s/tracks", c.baseURL, playlistID)
+	req, err := http.NewRequestWithContext(ctx, "PUT", spotifyURL, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	result := struct {
+		SnapshotID string `json:"snapshot_id"`
+	}{}
+
+	err = c.execute(req, &result, http.StatusCreated)
+	if err != nil {
+		return "", err
+	}
+
+	return result.SnapshotID, nil
 }
 
 // UserFollowsPlaylist checks if one or more (up to 5) Spotify users are following
