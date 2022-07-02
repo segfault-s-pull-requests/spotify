@@ -335,6 +335,44 @@ func (c *Client) AddTracksToPlaylist(ctx context.Context, playlistID ID, trackID
 	return result.SnapshotID, nil
 }
 
+// AddTracksToPlaylistOpt inserts one or more tracks to a user's playlist at the given position.
+// This call requires ScopePlaylistModifyPublic or ScopePlaylistModifyPrivate.
+// A maximum of 100 tracks can be added per call.  It returns a snapshot ID that
+// can be used to identify this version (the new version) of the playlist in
+// future requests.
+func (c *Client) AddTracksToPlaylistOpt(ctx context.Context, playlistID ID, position int, trackIDs ...ID) (snapshotID string, err error) {
+	uris := make([]string, len(trackIDs))
+	for i, id := range trackIDs {
+		uris[i] = fmt.Sprintf("spotify:track:%s", id)
+	}
+	m := make(map[string]interface{})
+	m["uris"] = uris
+	m["position"] = position
+
+	spotifyURL := fmt.Sprintf("%splaylists/%s/tracks",
+		c.baseURL, string(playlistID))
+	body, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", spotifyURL, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	result := struct {
+		SnapshotID string `json:"snapshot_id"`
+	}{}
+
+	err = c.execute(req, &result, http.StatusCreated)
+	if err != nil {
+		return "", err
+	}
+
+	return result.SnapshotID, nil
+}
+
 // RemoveTracksFromPlaylist removes one or more tracks from a user's playlist.
 // This call requrles that the user has authorized the ScopePlaylistModifyPublic
 // or ScopePlaylistModifyPrivate scopes.
